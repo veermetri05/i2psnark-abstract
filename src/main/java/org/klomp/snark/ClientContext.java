@@ -7,6 +7,9 @@ import java.util.List;
 
 import org.klomp.snark.data.Base32;
 import org.klomp.snark.dht.DHT;
+import org.klomp.snark.spi.DataFetcher;
+import org.klomp.snark.spi.DatagramTransportFactory;
+import org.klomp.snark.spi.Stream;
 import org.klomp.snark.spi.Environment;
 import org.klomp.snark.spi.EventBus;
 import org.klomp.snark.spi.Log;
@@ -88,6 +91,15 @@ public class ClientContext {
     // set once the DHT is started (Snark.start → startDHT)
     private volatile DHT _dht;
 
+    // set by the host application (TrackerClient / WebPeer HTTP)
+    private volatile DataFetcher _dataFetcher;
+
+    // set by the host application (UDP tracker client, extra DHT nodes)
+    private volatile DatagramTransportFactory _datagramTransportFactory;
+
+    // created by the engine when UDP trackers are enabled (Snark.start)
+    private volatile UDPTrackerClient _udpTracker;
+
     /**
      *  @param environment the engine environment (never null)
      *  @param connector outbound streams, already connected (never null)
@@ -161,6 +173,23 @@ public class ClientContext {
     /** @return true if the transport is up (replaces I2PSnarkUtil.connect()) */
     public boolean connect() {
         return connected();
+    }
+
+    /**
+     *  Connect to the given peer (replaces I2PSnarkUtil.connect(PeerID)).
+     *  The I2P banlist is not ported (transport-level concern).
+     *
+     *  @throws IOException on failure
+     */
+    public Stream connect(PeerID peer) throws IOException {
+        if (_connector == null)
+            throw new IOException("No stream connector");
+        PeerIdentity addr = peer.getAddress();
+        if (addr == null)
+            throw new IOException("Null address");
+        if (addr.equals(getMyDestination()))
+            throw new IOException("Attempt to connect to myself");
+        return _connector.connect(addr);
     }
 
     /** @return true if the transport session is up */
@@ -252,6 +281,56 @@ public class ClientContext {
     /** @return the identity factory */
     public PeerIdentityFactory getIdentityFactory() {
         return _identityFactory;
+    }
+
+    // ── HTTP over I2P (trackers, web seeds) ──────────────────────────
+
+    /** @return the HTTP fetcher, or null if the host app did not provide one */
+    public DataFetcher getDataFetcher() {
+        return _dataFetcher;
+    }
+
+    /** Set by the host application; null disables HTTP trackers/web seeds */
+    public void setDataFetcher(DataFetcher fetcher) {
+        _dataFetcher = fetcher;
+    }
+
+    /** @return the datagram transport factory, or null if not provided */
+    public DatagramTransportFactory getDatagramTransportFactory() {
+        return _datagramTransportFactory;
+    }
+
+    /** Set by the host application; null disables UDP trackers */
+    public void setDatagramTransportFactory(DatagramTransportFactory factory) {
+        _datagramTransportFactory = factory;
+    }
+
+    /** @return the UDP tracker client, or null if not started/disabled */
+    public UDPTrackerClient getUDPTrackerClient() {
+        return _udpTracker;
+    }
+
+    /** Called once by the engine when UDP trackers start */
+    public void setUDPTrackerClient(UDPTrackerClient udpTracker) {
+        _udpTracker = udpTracker;
+    }
+
+    /**
+     *  Rewrite an old-style announce URL (replaces
+     *  {@code I2PSnarkUtil.rewriteAnnounce(String)}):
+     *  <pre>
+     *    http://KEY.i2p/foo/announce  →  http://i2p/KEY/foo/announce
+     *    http://tracker.blah.i2p/foo  →  unchanged
+     *  </pre>
+     */
+    public static String rewriteAnnounce(String origAnnounce) {
+        int destStart = "http://".length();
+        int destEnd = origAnnounce.indexOf(".i2p");
+        if (destEnd < destStart + 516)
+            return origAnnounce;
+        int pathStart = origAnnounce.indexOf('/', destEnd);
+        return "http://i2p/" + origAnnounce.substring(destStart, destEnd)
+                + origAnnounce.substring(pathStart);
     }
 
     // ── DHT ──────────────────────────────────────────────────────────
@@ -366,6 +445,11 @@ public class ClientContext {
     /** {@code getString(key) + ' ' + o} */
     public String getString(String key, Object o) {
         return key + ' ' + o;
+    }
+
+    /** {@code getString(key) + ' ' + o + ' ' + o2} */
+    public String getString(String key, Object o, Object o2) {
+        return key + ' ' + o + ' ' + o2;
     }
 
     @Override

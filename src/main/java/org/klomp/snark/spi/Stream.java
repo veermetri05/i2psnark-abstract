@@ -21,6 +21,29 @@ public interface Stream {
     /** Set the read timeout in milliseconds (0 = infinite) */
     void setReadTimeout(int timeoutMs);
 
+    /** @return the current read timeout in milliseconds (0 = infinite, default) */
+    default int getReadTimeout() {
+        return 0;
+    }
+
+    /**
+     *  @return the remote peer identity, or null if unknown
+     *          (implementations wrapping I2PSocket return the peer
+     *          destination; loopback transports may return null)
+     */
+    default PeerIdentity getPeer() {
+        return null;
+    }
+
+    /**
+     *  @return the local port of this stream (I2P port), or 0 if
+     *          unknown — used by the full client to detect web seeds
+     *          (port 80)
+     */
+    default int getLocalPort() {
+        return 0;
+    }
+
     /** Close the stream (idempotent) */
     void close();
 

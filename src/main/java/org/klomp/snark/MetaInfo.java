@@ -833,4 +833,31 @@ public class MetaInfo
   }
 
   /** @since 0.8.5 */
+
+  /**
+   *  Verify a partial piece against the expected SHA-1 hash —
+   *  restored from upstream (WS-1.2).
+   *
+   *  @param pp the partial piece, must be complete
+   *  @return true if the hash matches
+   */
+  public boolean checkPiece(PartialPiece pp) {
+    int piece = pp.getPiece();
+    byte[] hash;
+    try {
+        hash = pp.getHash();
+    } catch (java.io.IOException ioe) {
+        // could be caused by closing a peer connection
+        org.klomp.snark.spi.Logs.getLog(MetaInfo.class).warn("Error checking", ioe);
+        return false;
+    }
+    byte[] hashes = getPieceHashes();
+    if (hashes == null || piece < 0 || piece >= getPieces())
+        return false;
+    for (int i = 0; i < 20; i++) {
+        if (hash[i] != hashes[20 * piece + i])
+            return false;
+    }
+    return true;
+  }
 }

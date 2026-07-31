@@ -31,4 +31,14 @@ public interface PeerIdentity {
 
     /** @return base32 encoding (I2P style, lowercase, with .b32.i2p suffix) */
     String toBase32();
+
+    /**
+     *  @return true if this identity uses the DSA-SHA1 signature type
+     *          (I2P). Default false; the I2P transport implementation
+     *          overrides. Used to skip trackers that only accept
+     *          DSA peers.
+     */
+    default boolean isDSA() {
+        return false;
+    }
 }

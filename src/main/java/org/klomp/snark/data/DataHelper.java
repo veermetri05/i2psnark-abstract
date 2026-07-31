@@ -272,4 +272,78 @@ public final class DataHelper {
         }
         return String.format(java.util.Locale.US, "%.1f%s", d, units[i]);
     }
+
+  /**
+   *  Skip n bytes on a stream, reading byte-by-byte if necessary —
+   *  port of {@code net.i2p.data.DataHelper.skip} (public domain, I2P).
+   *  @throws java.io.IOException
+   */
+  public static void skip(java.io.InputStream in, long n) throws java.io.IOException {
+      if (n < 0)
+          throw new IllegalArgumentException();
+      if (n == 0)
+          return;
+      long read = 0;
+      long nm1 = n - 1;
+      if (nm1 > 0) {
+          // skip all but the last byte
+          read = in.skip(nm1);
+          // if the stream didn't skip, read the bytes
+          if (read < nm1) {
+              byte[] buf = new byte[(int) Math.min(4096, n - read)];
+              while (read < nm1) {
+                  int sz = (int) Math.min(buf.length, nm1 - read);
+                  int r = in.read(buf, 0, sz);
+                  if (r < 0)
+                      break;
+                  read += r;
+              }
+          }
+      }
+      // skip/read the last byte
+      if (read < n) {
+          if (in.read() < 0)
+              throw new java.io.EOFException("EOF while skipping");
+      }
+  }
+
+  /** 8-byte big-endian long from an array — port of I2P's fromLong8 */
+  public static long fromLong8(byte src[], int offset) {
+      long rv = 0;
+      int limit = offset + 8;
+      for (int i = offset; i < limit; i++) {
+          rv <<= 8;
+          rv |= src[i] & 0xFF;
+      }
+      return rv;
+  }
+
+  /** 8-byte big-endian long into an array — port of I2P's toLong8 */
+  public static void toLong8(byte target[], int offset, long value) {
+      for (int i = offset + 7; i >= offset; i--) {
+          target[i] = (byte) value;
+          value >>= 8;
+      }
+  }
+
+  /** Read fully, throwing EOF on short read — port of I2P's read(InputStream, byte[]) */
+  public static int read(java.io.InputStream in, byte target[]) throws java.io.IOException {
+      return read(in, target, 0, target.length);
+  }
+
+  /**
+   *  WARNING - different than InputStream.read(target, offset, length)
+   *  for a nonzero offset: reads exactly length bytes or throws EOF.
+   *  Port of I2P's read(InputStream, byte[], int, int).
+   */
+  public static int read(java.io.InputStream in, byte target[], int offset, int length) throws java.io.IOException {
+      int cur = 0;
+      while (cur < length) {
+          int numRead = in.read(target, offset + cur, length - cur);
+          if (numRead == -1)
+              throw new java.io.EOFException("EOF after reading " + cur + " bytes of " + length + " byte value");
+          cur += numRead;
+      }
+      return cur;
+  }
 }
