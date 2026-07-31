@@ -28,6 +28,19 @@ public interface DatagramTransport extends Session {
     void setDatagramListener(DatagramListener listener);
 
     /**
+     *  @return our local query port (signed/repliable datagrams).
+     *          Fixed for the lifetime of this transport; the DHT node
+     *          identity (NID) is derived from it.
+     */
+    int getQueryPort();
+
+    /**
+     *  @return our local response port (raw/unsigned datagrams).
+     *          Typically query port + 1.
+     */
+    int getResponsePort();
+
+    /**
      *  Send a datagram.
      *
      *  @param dest the destination identity

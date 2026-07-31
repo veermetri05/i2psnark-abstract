@@ -211,16 +211,6 @@ public class KRPC implements DatagramListener, DHT {
      *  @param baseName generally "i2psnark"
      */
     public KRPC(Environment ctx, PeerIdentityFactory factory, String baseName, DatagramTransport transport) {
-        this(ctx, factory, baseName, transport, -1);
-    }
-
-    /**
-     *  @param baseName generally "i2psnark"
-     *  @param queryPort specific query port to use, or -1 for random
-     *  @since 1.0 (crawler extension)
-     */
-    public KRPC(Environment ctx, PeerIdentityFactory factory, String baseName,
-                DatagramTransport transport, int queryPort) {
         _context = ctx;
         _identityFactory = factory;
         _transport = transport;
@@ -232,15 +222,14 @@ public class KRPC implements DatagramListener, DHT {
         _incomingTokens = new ConcurrentHashMap<NID, Token>();
         _blacklist = Collections.newSetFromMap(new ConcurrentHashMap<NID, Boolean>());
 
-        // Use specified port or pick a random one
-        if (queryPort > 0 && queryPort < 65535) {
-            _qPort = queryPort;
-        } else {
-            // Pick ports over a big range to marginally increase security
-            // If we add a search DHT, adjust to stay out of each other's way
-            _qPort = TRACKER_PORT + 10 + ctx.random().nextInt(65535 - 20 - TRACKER_PORT);
-        }
-        _rPort = _qPort + 1;
+        // Ports are owned by the transport (which must register its
+        // session listeners on them). The NID is derived from the
+        // query port, so the port must be stable for the transport's
+        // lifetime.
+        _qPort = transport.getQueryPort();
+        _rPort = transport.getResponsePort();
+        if (_qPort <= 0 || _qPort >= 65535 || _rPort <= 0 || _rPort >= 65535)
+            throw new IllegalArgumentException("Bad transport ports: " + _qPort + "/" + _rPort);
         PeerIdentity myDest = transport.getLocalIdentity();
         if (SECURE_NID) {
             _myNID = NodeInfo.generateNID(myDest.calculateHash(), _qPort, _context.random());
@@ -251,7 +240,6 @@ public class KRPC implements DatagramListener, DHT {
             _myNID = new NID(_myID);
         }
         _myNodeInfo = new NodeInfo(_myNID, myDest, _qPort);
-        String configDir = ctx.storage().getConfigDir();
         String confName = baseName + ".config" + CONFIG_DIR_SUFFIX;
         _dhtFileName = confName + "/i2psnark" + DHT_FILE_SUFFIX;
         if (baseName.equals("i2psnark")) {

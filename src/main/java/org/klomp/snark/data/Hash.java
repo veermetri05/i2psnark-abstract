@@ -38,6 +38,16 @@ public class Hash extends SimpleDataStructure {
         return this;
     }
 
+    /**
+     *  @return the lowercase base32 form + ".b32.i2p" suffix
+     *          (the I2P hostname form of this hash)
+     */
+    public String toBase32() {
+        if (_data == null)
+            return null;
+        return Base32.encode(_data) + ".b32.i2p";
+    }
+
     @Override
     public boolean equals(Object object) {
         return super.equals(object);
