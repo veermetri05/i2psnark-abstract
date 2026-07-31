@@ -1,0 +1,75 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+// ── Project metadata ────────────────────────────────────────────────
+
+group = 'org.klomp'
+version = '0.1.0'
+description = 'I2PSnark Abstract — implementation-free core of the I2PSnark BitTorrent client (BEP 9/10 metadata download + I2P DHT), with an event-driven SPI for UI integration.'
+
+// ── Repositories ────────────────────────────────────────────────────
+
+repositories {
+    mavenCentral()
+}
+
+// ── Dependencies ────────────────────────────────────────────────────
+// The abstract layer has ZERO runtime dependencies — pure Java 8.
+// Only the test suite uses JUnit.
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+
+// ── Java configuration ──────────────────────────────────────────────
+// Java 8 source/target so the library compiles into both the desktop
+// crawler (Java 11+) and the Android app (AGP) without desugaring.
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_1_8
+    targetCompatibility = JavaVersion.VERSION_1_8
+    withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    // Silence the "source/target 8 obsolete" warning noise
+    options.compilerArgs += ['-Xlint:-options']
+}
+
+test {
+    useJUnit()
+    testLogging {
+        events 'passed', 'skipped', 'failed'
+        exceptionFormat 'full'
+    }
+}
+
+// ── Publishing ──────────────────────────────────────────────────────
+// `./gradlew publishToMavenLocal` makes the library available to the
+// desktop crawler (i2p_trials) which already lists mavenLocal().
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            pom {
+                name = 'i2psnark-abstract'
+                description = project.description
+                licenses {
+                    license {
+                        name = 'GNU General Public License v2.0'
+                        url = 'https://www.gnu.org/licenses/old-licenses/gpl-2.0.txt'
+                    }
+                }
+            }
+        }
+    }
+}
+
+wrapper {
+    gradleVersion = '8.6'
+    distributionType = Wrapper.DistributionType.BIN
+}
