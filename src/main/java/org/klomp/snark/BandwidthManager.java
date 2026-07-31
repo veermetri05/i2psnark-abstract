@@ -59,7 +59,7 @@ public class BandwidthManager implements BandwidthListener {
     /**
      * Current limit in Bps
      */
-    void setUpBWLimit(long upLimit) {
+    public void setUpBWLimit(long upLimit) {
         int limit = (int) Math.min(upLimit, Integer.MAX_VALUE);
         if (limit != getUpBWLimit())
             _up = new SyntheticREDQueue(_env, limit);
@@ -68,7 +68,7 @@ public class BandwidthManager implements BandwidthListener {
     /**
      * Current limit in Bps
      */
-    void setDownBWLimit(long downLimit) {
+    public void setDownBWLimit(long downLimit) {
         int limit = (int) Math.min(downLimit, Integer.MAX_VALUE);
         if (limit != getDownBWLimit()) {
             _down = new SyntheticREDQueue(_env, limit);

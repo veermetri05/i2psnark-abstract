@@ -53,7 +53,7 @@ import org.klomp.snark.dht.DHT;
 /**
  * Coordinates what peer does what.
  */
-class PeerCoordinator implements PeerListener, BandwidthListener
+public class PeerCoordinator implements PeerListener, BandwidthListener
 {
   private final Log _log;
 
@@ -147,6 +147,12 @@ class PeerCoordinator implements PeerListener, BandwidthListener
 
   /** per-torrent override of the ClientContext default; null = use default */
   private volatile ClientContext.PieceSelection _pieceSelection;
+
+  /** per-torrent bandwidth caps; null = use the global listener */
+  private volatile Long _upLimit, _downLimit;
+
+  /** per-torrent connection/uploader caps; 0 = use the ClientContext default */
+  private volatile int _maxConnections, _maxUploaders;
 
   private volatile boolean halted;
 
@@ -298,6 +304,16 @@ class PeerCoordinator implements PeerListener, BandwidthListener
   }
 
   public Storage getStorage() { return storage; }
+
+  /** Set the per-torrent max connections (0 = ClientContext default) */
+  public void setMaxConnections(int connections) {
+      _maxConnections = Math.max(connections, 0);
+  }
+
+  /** Set the per-torrent max upload slots (0 = ClientContext default) */
+  public void setMaxUploaders(int uploads) {
+      _maxUploaders = Math.max(uploads, 0);
+  }
 
   /**
    *  Override the piece selection strategy for this torrent
@@ -581,11 +597,28 @@ class PeerCoordinator implements PeerListener, BandwidthListener
   }
 
   /**
-   * Current limit in Bps
+   * Current limit in Bps — per-torrent override or the global listener
    * @since 0.9.62
    */
   public long getUpBWLimit() {
-      return bwListener.getUpBWLimit();
+      Long l = _upLimit;
+      return l != null ? l : bwListener.getUpBWLimit();
+  }
+
+  /** Set the per-torrent upload cap in Bps (0 = use the global limit) */
+  public void setUpBWLimit(long limit) {
+      _upLimit = limit > 0 ? Long.valueOf(limit) : null;
+  }
+
+  /** Set the per-torrent download cap in Bps (0 = use the global limit) */
+  public void setDownBWLimit(long limit) {
+      _downLimit = limit > 0 ? Long.valueOf(limit) : null;
+  }
+
+  /** Current limit in Bps — per-torrent override or the global listener */
+  public long getDownBWLimit() {
+      Long l = _downLimit;
+      return l != null ? l : bwListener.getDownBWLimit();
   }
 
   /**
@@ -593,7 +626,15 @@ class PeerCoordinator implements PeerListener, BandwidthListener
    */
   public boolean overUpBWLimit()
   {
-    return bwListener.overUpBWLimit();
+    return getUploadRate() > getUpBWLimit();
+  }
+
+  /**
+   *  Is snark as a whole over its limit?
+   */
+  public boolean overDownBWLimit()
+  {
+    return getDownloadRate() > getDownBWLimit();
   }
 
   /**
@@ -603,22 +644,6 @@ class PeerCoordinator implements PeerListener, BandwidthListener
   public boolean overUpBWLimit(long total)
   {
     return total * 1000 / CHECK_PERIOD > getUpBWLimit();
-  }
-
-  /**
-   * Current limit in Bps
-   * @since 0.9.62
-   */
-  public long getDownBWLimit() {
-      return bwListener.getDownBWLimit();
-  }
-
-  /**
-   * Are we currently over the limit?
-   * @since 0.9.62
-   */
-  public boolean overDownBWLimit() {
-      return bwListener.overDownBWLimit();
   }
 
   /////// end BandwidthListener interface ///////
@@ -1768,6 +1793,11 @@ class PeerCoordinator implements PeerListener, BandwidthListener
   public int allowedUploaders()
   {
     int up = uploaders.get();
+    if (_maxUploaders > 0) {
+        int mine = _maxUploaders;
+        if (up >= mine)
+            return up - 1;
+    }
     if (listener != null && listener.overUploadLimit(interestedUploaders.get())) {
            if (_log.shouldLog(Log.DEBUG))
              _log.debug("Over limit, uploaders was: " + up);

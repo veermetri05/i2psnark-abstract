@@ -4,7 +4,7 @@
 
 package org.klomp.snark;
 
-interface CoordinatorListener
+public interface CoordinatorListener
 {
   /**
    * Called when the PeerCoordinator notices a change in the state of a peer.

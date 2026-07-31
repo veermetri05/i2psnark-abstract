@@ -9,6 +9,7 @@ import org.klomp.snark.data.Base32;
 import org.klomp.snark.dht.DHT;
 import org.klomp.snark.spi.DataFetcher;
 import org.klomp.snark.spi.DatagramTransportFactory;
+import org.klomp.snark.spi.DatagramTransport;
 import org.klomp.snark.spi.Stream;
 import org.klomp.snark.spi.Environment;
 import org.klomp.snark.spi.EventBus;
@@ -191,7 +192,22 @@ public class ClientContext {
 
     /** @return true if the transport is up (replaces I2PSnarkUtil.connect()) */
     public boolean connect() {
-        return connected();
+        boolean ok = connected();
+        if (ok && _useDHT && _dht == null && _datagramTransportFactory != null) {
+            try {
+                // one DHT node per engine session (replaces
+                // I2PSnarkUtil's "new KRPC(_context, _baseName, session)")
+                DatagramTransport dgram = _datagramTransportFactory.createDatagramTransport(0);
+                org.klomp.snark.dht.KRPC krpc = new org.klomp.snark.dht.KRPC(
+                        _environment, _identityFactory, "libretorrent", dgram);
+                _dht = krpc;
+                log(ClientContext.class).info("I2P DHT started on port " + dgram.getQueryPort());
+            } catch (RuntimeException e) {
+                _dht = null;
+                log(ClientContext.class).warn("DHT start failed", e);
+            }
+        }
+        return ok;
     }
 
     /**
@@ -221,8 +237,17 @@ public class ClientContext {
         return false;
     }
 
-    /** No-op: the transport lifecycle is owned by the host application */
+    /** Stop the DHT; the transport lifecycle is owned by the host application */
     public void disconnect() {
+        DHT dht = _dht;
+        _dht = null;
+        if (dht != null) {
+            try {
+                dht.stop();
+            } catch (RuntimeException e) {
+                log(ClientContext.class).warn("DHT stop failed", e);
+            }
+        }
     }
 
     /** @return true once the transport is configured */
