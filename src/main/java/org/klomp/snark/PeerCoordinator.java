@@ -145,6 +145,9 @@ class PeerCoordinator implements PeerListener, BandwidthListener
   /** partial pieces - lock by synching on wantedPieces - TODO store Requests, not PartialPieces */
   private final List<PartialPiece> partialPieces;
 
+  /** per-torrent override of the ClientContext default; null = use default */
+  private volatile ClientContext.PieceSelection _pieceSelection;
+
   private volatile boolean halted;
 
   private final MagnetState magnetState;
@@ -287,11 +290,63 @@ class PeerCoordinator implements PeerListener, BandwidthListener
               }
           }
           wantedBytes = count;
-          Collections.shuffle(wantedPieces, _random);
+          if (pieceSelection() == ClientContext.PieceSelection.RAREST_FIRST)
+              Collections.shuffle(wantedPieces, _random);
+          else
+              sortWantedPieces();
       }
   }
 
   public Storage getStorage() { return storage; }
+
+  /**
+   *  Override the piece selection strategy for this torrent
+   *  (WS-1.4). Null restores the ClientContext default.
+   */
+  public void setPieceSelection(ClientContext.PieceSelection selection) {
+      _pieceSelection = selection;
+  }
+
+  /** @return the active selection strategy */
+  private ClientContext.PieceSelection pieceSelection() {
+      ClientContext.PieceSelection sel = _pieceSelection;
+      if (sel == null)
+          sel = _ctx.getPieceSelection();
+      return sel != null ? sel : ClientContext.PieceSelection.RAREST_FIRST;
+  }
+
+  /**
+   *  Order the wanted pieces per the active strategy (WS-1.4):
+   *  rarest-first (Piece.compareTo), ascending id (sequential), or
+   *  ends-first (first/last piece priority).
+   */
+  private void sortWantedPieces() {
+      switch (pieceSelection()) {
+          case SEQUENTIAL:
+              Collections.sort(wantedPieces, (a, b) -> a.getId() - b.getId());
+              break;
+          case FIRST_LAST:
+              Collections.sort(wantedPieces, (a, b) -> {
+                  int da = endDistance(a.getId());
+                  int db = endDistance(b.getId());
+                  if (da != db)
+                      return da - db;
+                  return a.getId() - b.getId();
+              });
+              break;
+          default:
+              // Sort in order of rarest first (priority desc, then rarest)
+              Collections.sort(wantedPieces);
+      }
+  }
+
+  /** distance to the nearer end of the torrent, for FIRST_LAST */
+  private int endDistance(int piece) {
+      int total = metainfo != null ? metainfo.getPieces() : 0;
+      if (total <= 0)
+          return 0;
+      return Math.min(piece, total - 1 - piece);
+  }
 
   /** for web page detailed stats */
   public List<Peer> peerList()
@@ -967,7 +1022,7 @@ class PeerCoordinator implements PeerListener, BandwidthListener
     synchronized(wantedPieces)
       {
         if (record)
-            Collections.sort(wantedPieces); // Sort in order of rarest first.
+            sortWantedPieces();
         Iterator<Piece> it = wantedPieces.iterator();
         while (piece == null && it.hasNext())
           {
@@ -1110,7 +1165,10 @@ class PeerCoordinator implements PeerListener, BandwidthListener
           if (_log.shouldLog(Log.DEBUG))
               _log.debug("Updated piece priorities, now wanted: " + wantedPieces);
           // if we added pieces, they will be in-order unless we shuffle
-          Collections.shuffle(wantedPieces, _random);
+          if (pieceSelection() == ClientContext.PieceSelection.RAREST_FIRST)
+              Collections.shuffle(wantedPieces, _random);
+          else
+              sortWantedPieces();
       }
 
       // cancel outside of wantedPieces lock to avoid deadlocks

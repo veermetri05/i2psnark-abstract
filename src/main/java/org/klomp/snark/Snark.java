@@ -30,6 +30,7 @@ import java.util.Properties;
 import java.util.StringTokenizer;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.klomp.snark.event.TorrentEvent;
 import org.klomp.snark.spi.Log;
 import org.klomp.snark.spi.RandomSource;
 import org.klomp.snark.spi.Logs;
@@ -239,6 +240,8 @@ public class Snark
   // String indicating main activity
   private volatile String activity = "Not started";
   private long savedUploaded;
+  /** throttle SPEED events to one per second */
+  private long _lastSpeedEvent;
   private long _startedTime;
   private static final AtomicInteger __RPCID = new AtomicInteger();
   private final int _rpcID = __RPCID.incrementAndGet();
@@ -774,6 +777,15 @@ public class Snark
      *  @return may be null if in magnet mode
      *  @since 0.8.4
      */
+    /**
+     *  @return the peer coordinator (after startTorrent), or null
+     *          before start / after stop — needed by the app adapter
+     *          (peers, pieces, priorities)
+     */
+    public PeerCoordinator getCoordinator() {
+        return coordinator;
+    }
+
     public Storage getStorage() {
         return storage;
     }
@@ -903,6 +915,7 @@ public class Snark
      *  @since 0.8.4
      */
     public void setTrackerProblems(String p) {
+        fire(TorrentEvent.Type.TRACKERS_CHANGED, p);
         trackerProblems = p;
     }
 
@@ -1248,6 +1261,7 @@ public class Snark
   private void fatalRouter(String s, Throwable t) throws RouterException {
     _log.error(s, t);
     System.out.println(s);
+    fire(TorrentEvent.Type.ERROR, s);
     stopTorrent(true);
     if (completeListener != null)
         completeListener.fatal(this, s);
@@ -1267,7 +1281,7 @@ public class Snark
   /** CoordinatorListener - this does nothing */
   public void peerChange(PeerCoordinator coordinator, Peer peer)
   {
-    // System.out.println(peer.toString());
+    fire(TorrentEvent.Type.PEERS_CHANGED, null);
   }
   
   /**
@@ -1301,6 +1315,7 @@ public class Snark
               // else some horrible problem
           }
           coordinator.setStorage(storage);
+          fire(TorrentEvent.Type.METADATA_ADDED, null);
       } catch (IOException ioe) {
           if (storage != null) {
               try { storage.close(); } catch (IOException ioee) {}
@@ -1325,6 +1340,37 @@ public class Snark
       TrackerClient tc = trackerclient;
       if (tc != null)
           tc.reinitialize();
+  }
+
+  /**
+   *  Post a TorrentEvent on the shared bus (WS-1.3).
+   */
+  private void fire(TorrentEvent.Type type, String message) {
+      org.klomp.snark.spi.EventBus bus = _ctx != null ? _ctx.getEventBus() : null;
+      if (bus != null)
+          bus.post(new TorrentEvent(type, infoHash, message));
+  }
+
+  /**
+   *  Sequential download mode (WS-1.4) — maps to
+   *  TorrentDownload.setSequentialDownload() in the app adapter.
+   */
+  public void setSequentialDownload(boolean sequential) {
+      if (coordinator != null)
+          coordinator.setPieceSelection(sequential
+                  ? ClientContext.PieceSelection.SEQUENTIAL
+                  : null);
+  }
+
+  /**
+   *  First/last piece priority (WS-1.4) — maps to
+   *  TorrentDownload.setFirstLastPiecePriority().
+   */
+  public void setFirstLastPiecePriority(boolean priority) {
+      if (coordinator != null)
+          coordinator.setPieceSelection(priority
+                  ? ClientContext.PieceSelection.FIRST_LAST
+                  : null);
   }
 
   ///////////// Begin StorageListener methods
@@ -1376,8 +1422,16 @@ public class Snark
     if (!checking) {
         if (_log.shouldLog(Log.INFO))
             _log.info("Got " + (checked ? "" : "BAD ") + "piece: " + num);
+        fire(TorrentEvent.Type.PIECES_CHANGED, null);
+        long now = System.currentTimeMillis();
+        if (now - _lastSpeedEvent > 1000) {
+            _lastSpeedEvent = now;
+            fire(TorrentEvent.Type.SPEED, null);
+        }
         if (completeListener != null)
             completeListener.gotPiece(this);
+    } else {
+        fire(TorrentEvent.Type.PROGRESS, "checked " + num);
     }
   }
 
@@ -1388,6 +1442,7 @@ public class Snark
 
     allChecked = true;
     checking = false;
+    fire(TorrentEvent.Type.RECHECK_DONE, null);
     if (storage.isChanged() && completeListener != null) {
         completeListener.updateStatus(this);
         // this saved the status, so reset the variables
@@ -1400,8 +1455,7 @@ public class Snark
   {
     if (_log.shouldLog(Log.INFO))
         _log.info("Completely received " + torrent);
-    //storage.close();
-    //System.out.println("Completely received: " + torrent);
+    fire(TorrentEvent.Type.STATE_CHANGED, "complete");
     if (completeListener != null) {
         completeListener.torrentComplete(this);
         // this saved the status, so reset the variables

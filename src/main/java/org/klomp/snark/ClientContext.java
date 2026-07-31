@@ -48,6 +48,24 @@ import org.klomp.snark.spi.StreamServer;
  */
 public class ClientContext {
 
+    /**
+     *  Piece selection strategy (proposal WS-1.4).
+     *  <ul>
+     *    <li>{@link #RAREST_FIRST} — upstream default: highest file
+     *        priority first, then rarest piece first</li>
+     *    <li>{@link #SEQUENTIAL} — ascending piece order (streaming;
+     *        maps to TorrentDownload.setSequentialDownload)</li>
+     *    <li>{@link #FIRST_LAST} — first and last pieces first, then
+     *        by proximity to the ends (playback; maps to
+     *        setFirstLastPiecePriority)</li>
+     *  </ul>
+     */
+    public enum PieceSelection {
+        RAREST_FIRST,
+        SEQUENTIAL,
+        FIRST_LAST
+    }
+
     /** BitTorrent-over-I2P convention port (TrackerClient.PORT) */
     public static final int PORT = 6881;
     /** Outbound request size in bytes (PeerState.PARTSIZE) */
@@ -85,6 +103,7 @@ public class ClientContext {
     private boolean _areFilesPublic;
     private boolean _udpEnabled = true;
     private boolean _useDHT = DEFAULT_USE_DHT;
+    private PieceSelection _pieceSelection = PieceSelection.RAREST_FIRST;
     private List<String> _openTrackers = Collections.emptyList();
     private List<String> _backupTrackers = Collections.emptyList();
 
@@ -409,6 +428,15 @@ public class ClientContext {
 
     public void setUDPEnabled(boolean yes) {
         _udpEnabled = yes;
+    }
+
+    /** @return the default piece selection strategy (per-torrent can override) */
+    public PieceSelection getPieceSelection() {
+        return _pieceSelection;
+    }
+
+    public void setPieceSelection(PieceSelection selection) {
+        _pieceSelection = selection != null ? selection : PieceSelection.RAREST_FIRST;
     }
 
     /** @return the directory for partial-piece temp files */

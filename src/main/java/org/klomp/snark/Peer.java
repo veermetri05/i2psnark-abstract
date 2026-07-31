@@ -302,7 +302,6 @@ public class Peer implements Comparable<Peer>, BandwidthListener
             out.sendExtension(0, ExtensionHandler.getHandshake(metasize, pexAndMetadata, dht, uploadOnly));
         }
 
-        // Send our bitmap
         if (bitfield != null)
           s.out.sendBitfield(bitfield);
     
