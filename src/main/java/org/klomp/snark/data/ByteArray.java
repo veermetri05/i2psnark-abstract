@@ -9,9 +9,16 @@ public class ByteArray extends SimpleDataStructure {
     /** valid data length; -1 if unset */
     private int _valid = -1;
 
-    /** @param data may be null */
+    /**
+     *  @param data may be null. Assigned directly: the base class
+     *              {@code setData()} validation cannot run before
+     *              {@link #length()} is meaningful.
+     */
     public ByteArray(byte[] data) {
-        super(data);
+        if (data != null) {
+            _data = data;
+            _valid = data.length;
+        }
     }
 
     @Override

@@ -229,6 +229,36 @@ public final class DataHelper {
         return String.format(java.util.Locale.US, "%.1f%s", d, units[i]);
     }
 
+    /** Format a byte count as e.g. "123.4 KB" (base 1024) — the I2P "formatSize" form */
+    public static String formatSize(long size) {
+        if (size < 1024)
+            return Long.toString(size) + " B";
+        String[] units = {"KB", "MB", "GB", "TB", "PB"};
+        double d = size;
+        int i = -1;
+        while (d >= 1024 && i < units.length - 1) {
+            d /= 1024;
+            i++;
+        }
+        return String.format(java.util.Locale.US, "%.1f %s", d, units[i]);
+    }
+
+    /**
+     *  Deterministic byte-array hash, as in I2P's DataHelper —
+     *  {@code rv = 31*rv + b} over the array.
+     */
+    public static int hashCode(byte[] data) {
+        return hashCode(data, 0, data.length);
+    }
+
+    /** Deterministic byte-array hash over a sub-range. */
+    public static int hashCode(byte[] data, int off, int len) {
+        int rv = 0;
+        for (int i = 0; i < len; i++)
+            rv = 31 * rv + data[off + i];
+        return rv;
+    }
+
     /** Format a byte count as e.g. "1.5K" (base 1000) */
     public static String formatSize2Decimal(long size) {
         if (size < 1000)

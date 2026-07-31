@@ -47,4 +47,68 @@ public final class Base32 {
             out.append(ALPHABET[fivebits]);
         }
     }
+
+    /**
+     *  Decode lowercase base32 (no trailing '=' allowed) — port of
+     *  {@code net.i2p.data.Base32#decode(String)} (public domain, I2P).
+     *
+     *  @param source non-null, lowercase, unpadded
+     *  @return the decoded bytes, or null on invalid input
+     */
+    public static byte[] decode(String source) {
+        if (source.length() <= 1)
+            return new byte[source.length()];
+        int len58 = source.length() * 5 / 8;
+        byte[] outBuff = new byte[len58];
+        int outBuffPosn = 0;
+
+        int usedbits = 0;
+        for (int i = 0; i < source.length(); i++) {
+            char c = source.charAt(i);
+            int fivebits;
+            if (c < '2' || c > 'z')
+                fivebits = -1;
+            else if (c <= '7')
+                fivebits = c - '2' + 26;
+            else if (c <= 'Z')
+                fivebits = c - 'A';
+            else if (c <= 'z')
+                fivebits = c - 'a';
+            else
+                fivebits = -1;
+
+            if (fivebits >= 0) {
+                if (outBuffPosn >= len58)
+                    return null;
+                if (usedbits == 0) {
+                    outBuff[outBuffPosn] = (byte) ((fivebits << 3) & 0xf8);
+                    usedbits = 5;
+                } else if (usedbits < 3) {
+                    outBuff[outBuffPosn] |= (byte) ((fivebits << (3 - usedbits)) & DMASK[usedbits]);
+                    usedbits += 5;
+                } else if (usedbits == 3) {
+                    outBuff[outBuffPosn++] |= (byte) fivebits;
+                    usedbits = 0;
+                } else {
+                    outBuff[outBuffPosn++] |= (byte) ((fivebits >> (usedbits - 3)) & DMASK[usedbits]);
+                    byte next = (byte) (fivebits << (11 - usedbits));
+                    if (outBuffPosn < len58) {
+                        outBuff[outBuffPosn] = next;
+                        usedbits -= 3;
+                    } else if (next != 0) {
+                        // extra data at the end
+                        return null;
+                    }
+                }
+            } else {
+                return null;
+            }
+        }
+        return outBuff;
+    }
+
+    /** masks for the used-bits cases, indexed by usedbits (0-7) — as in I2P */
+    private static final byte[] DMASK = {(byte) 0xf8, (byte) 0x7c, (byte) 0x3e,
+                                          (byte) 0x1f, (byte) 0x0f, (byte) 0x07,
+                                          (byte) 0x03, (byte) 0x01};
 }
