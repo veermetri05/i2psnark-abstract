@@ -16,6 +16,12 @@ package org.klomp.snark.spi;
  *
  *  The DHT (KRPC) only sees bencoded payloads.
  *
+ *  <b>Single-listener:</b> at most one {@link DatagramListener} at a
+ *  time — {@link #setDatagramListener} replaces the previous one.
+ *  KRPC and UDPTrackerClient therefore cannot share one transport;
+ *  hosts that need both must provide two transports (each with its own
+ *  port pair) or a muxing implementation.
+ *
  *  @since 0.1.0
  */
 public interface DatagramTransport extends Session {

@@ -413,17 +413,12 @@ public class KRPC implements DatagramListener, DHT {
                  logInfo("Exploring: unexpected reply " + replyType + " from " + nInfo.getNID() + ": " + waiter.getReplyObject());
             }
         }
-        int addedCount = 0;
-        for (NodeInfo ni : toTry) {
-            if (!tried.contains(ni)) {
-                _knownNodes.putIfAbsent(ni);
-                addedCount++;
-            }
-        }
+        // Only nodes that actually replied enter the routing table (via
+        // heardAbout on pong/reply). Nodes merely mentioned in responses
+        // are only queued for trying — never inserted unverified.
         logInfo("Finished explore of " + target + ": queried " + queriedCount +
                       ", got replies from " + replyCount +
                       ", discovered " + newNodeCount + " new nodes" +
-                      ", added " + addedCount + " to routing table" +
                       ", routing table now has " + _knownNodes.size() + " nodes");
     }
 
@@ -695,19 +690,12 @@ public class KRPC implements DatagramListener, DHT {
                  heardFrom.add(waiter.getSentTo());
                  List<NodeInfo> reply = (List<NodeInfo>) waiter.getReplyObject();
                  logInfo("getPeers: got " + reply.size() + " closer nodes from " + nInfo.getNID());
-                 int added = 0;
                  for (NodeInfo ni : reply) {
-                     if (ni.equals(_myNodeInfo))
-                         continue;
-                     // Add to routing table so DHT grows over time
-                     NodeInfo existing = _knownNodes.putIfAbsent(ni);
-                     if (existing == null) added++;
-                     // Also add to toTry for further querying
-                     if (!tried.contains(ni))
+                     // queue them for trying, but only nodes that reply
+                     // (heardAbout) enter the routing table
+                     if (! (ni.equals(_myNodeInfo) || tried.contains(ni) || toTry.contains(ni)))
                          toTry.add(ni);
                  }
-                 if (added > 0)
-                     logInfo("getPeers: added " + added + " new nodes to routing table (now " + _knownNodes.size() + ")");
             } else if (replyType == REPLY_NETWORK_FAIL) {
                  break;
             } else {

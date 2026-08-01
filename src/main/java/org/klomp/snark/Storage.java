@@ -49,6 +49,7 @@ import org.klomp.snark.data.SHA1;
 import org.klomp.snark.data.ByteArray;
 import org.klomp.snark.data.DataHelper;
 import org.klomp.snark.util.ByteCache;
+import org.klomp.snark.util.FilePerms;
 import org.klomp.snark.spi.Log;
 import org.klomp.snark.spi.Logs;
 
@@ -875,6 +876,8 @@ public class Storage implements Closeable
         // so do it second
         if (!_base.exists() && !_base.createNewFile())
           throw new IOException("Could not create file " + _base);
+        if (!areFilesPublic)
+            FilePerms.setPerms(_base);
 
         _torrentFiles.add(new TorrentFile(_base, _base, metainfo.getTotalLength()));
         if (useSavedBitField) {
@@ -980,6 +983,8 @@ public class Storage implements Closeable
               } else {
                   if (!_base.createNewFile())
                       throw new IOException("File '" + tf.name + "' was deleted, unable to recreate");
+                  if (!(_ctx != null && _ctx.getFilesPublic()))
+                      FilePerms.setPerms(_base);
               }
               synchronized(tf) {
                   tf.allocateFile();
@@ -1114,6 +1119,8 @@ public class Storage implements Closeable
                 f = new java.io.File(base, name);
             if (!f.mkdir() && !f.isDirectory())
               throw new IOException("Could not create directory " + f);
+            if (!areFilesPublic)
+                FilePerms.setPerms(f);
             base = f;
           }
         else
@@ -1127,6 +1134,8 @@ public class Storage implements Closeable
             // so do it second
             if (!f.exists() && !f.createNewFile())
               throw new IOException("Could not create file " + f);
+            if (!areFilesPublic)
+                FilePerms.setPerms(f);
           }
       }
     return f;
@@ -1265,6 +1274,8 @@ public class Storage implements Closeable
               } else {
                   if (!_base.createNewFile())
                       throw new IOException("File '" + tf.name + "' was deleted, unable to recreate");
+                  if (!(_ctx != null && _ctx.getFilesPublic()))
+                      FilePerms.setPerms(_base);
               }
               String msg = "File '" + tf.name + "' was deleted, must be downloaded again";
               if (listener != null)

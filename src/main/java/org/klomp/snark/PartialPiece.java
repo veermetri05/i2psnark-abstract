@@ -13,6 +13,7 @@ import org.klomp.snark.data.ByteArray;
 import org.klomp.snark.util.ByteCache;
 import org.klomp.snark.spi.Log;
 import org.klomp.snark.spi.Logs;
+import org.klomp.snark.util.FilePerms;
 
 
 /**
@@ -101,6 +102,7 @@ class PartialPiece implements Comparable<PartialPiece> {
         //tfile = SecureFile.createTempFile("piece", null, tempDir);
         // debug
         tempfile = java.io.File.createTempFile("piece_" + piece.getId() + '_', null, tempDir);
+        FilePerms.setPerms(tempfile);
         raf = new RandomAccessFile(tempfile, "rw");
     }
 

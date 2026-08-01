@@ -320,6 +320,13 @@ class WebPeer extends Peer {
                           _log.warn("WebPeer fetch failed: " + url, ioe);
                   }
                   if (data != null) {
+                      if (data.length > flen) {
+                          // DataFetcher should have enforced maxBytes; never trust it
+                          if (_log.shouldWarn())
+                              _log.warn("Oversize web seed response from " + url + ": " + data.length + " > " + flen);
+                          fail(url, 413);
+                          return;
+                      }
                       int toCopy = Math.min(data.length, flen);
                       out.write(data, 0, toCopy);
                       lastRcvd = System.currentTimeMillis();
