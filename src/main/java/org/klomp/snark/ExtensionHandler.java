@@ -199,8 +199,8 @@ abstract class ExtensionHandler {
      * @since 0.8.4
      */
     private static void handleMetadata(Peer peer, PeerListener listener, byte[] bs, Log log) {
-        if (log.shouldLog(Log.DEBUG))
-            log.debug("Got metadata msg from " + peer);
+        if (log.shouldLog(Log.INFO))
+            log.info("Got metadata msg from " + peer);
         try {
             InputStream is = new ByteArrayInputStream(bs);
             BDecoder dec = new BDecoder(is);
@@ -211,8 +211,8 @@ abstract class ExtensionHandler {
 
             MagnetState state = peer.getMagnetState();
             if (type == TYPE_REQUEST) {
-                if (log.shouldLog(Log.DEBUG))
-                    log.debug("Got request for " + piece + " from: " + peer);
+                if (log.shouldLog(Log.INFO))
+                    log.info("Got metadata request for piece " + piece + " from: " + peer);
                 byte[] pc;
                 int totalSize;
                 synchronized(state) {
@@ -220,6 +220,9 @@ abstract class ExtensionHandler {
                     totalSize = state.getSize();
                 }
                 sendPiece(peer, piece, pc, totalSize);
+                if (log.shouldLog(Log.INFO))
+                    log.info("Sent metadata piece " + piece + " (" + (pc != null ? pc.length : 0)
+                            + " bytes, total " + totalSize + ") to " + peer);
                 // Do this here because PeerConnectionOut only reports for PIECE messages
                 peer.uploaded(pc.length);
             } else if (type == TYPE_DATA) {
@@ -270,6 +273,8 @@ abstract class ExtensionHandler {
         } catch (Exception e) {
             if (log.shouldLog(Log.INFO))
                 log.info("Metadata ext. msg. exception from " + peer, e);
+            if (log.shouldLog(Log.WARN))
+                log.warn("Disconnecting " + peer + " after metadata error: " + e);
             // fatal ?
             peer.disconnect(false);
         }

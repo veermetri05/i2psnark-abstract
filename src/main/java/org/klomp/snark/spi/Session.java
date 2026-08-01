@@ -25,6 +25,24 @@ public interface Session {
      */
     PeerIdentity lookup(byte[] sha256Hash, long timeoutMs) throws IOException;
 
+    /**
+     *  Resolve an I2P host name (e.g. {@code tracker2.postman.i2p}) via
+     *  the transport's naming service — SAM NAMING LOOKUP (router
+     *  addressbook) or the I2CP session lookup for names.
+     *
+     *  Default: no naming service (returns null). Transport
+     *  implementations with a naming service override this.
+     *
+     *  @param name the host name (with or without the {@code .i2p}
+     *              suffix)
+     *  @param timeoutMs maximum time to wait
+     *  @return the resolved identity, or null if the name is unknown
+     *  @throws IOException on lookup failure
+     */
+    default PeerIdentity lookupName(String name, long timeoutMs) throws IOException {
+        return null; // no naming service
+    }
+
     /** @return true if the underlying session is closed */
     boolean isClosed();
 }

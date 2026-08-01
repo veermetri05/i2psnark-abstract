@@ -7,8 +7,6 @@ package org.klomp.snark.dht;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -25,6 +23,7 @@ import java.util.Collections;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.klomp.snark.ClientContext;
 import org.klomp.snark.bencode.BDecoder;
 import org.klomp.snark.bencode.BEncoder;
 import org.klomp.snark.bencode.BEValue;
@@ -35,6 +34,7 @@ import org.klomp.snark.data.Hash;
 import org.klomp.snark.event.DhtEvent;
 import org.klomp.snark.event.DhtListener;
 import org.klomp.snark.spi.Cancellable;
+import org.klomp.snark.spi.DataFetcher;
 import org.klomp.snark.spi.DatagramListener;
 import org.klomp.snark.spi.DatagramTransport;
 import org.klomp.snark.spi.Environment;
@@ -151,8 +151,8 @@ public class KRPC implements DatagramListener, DHT {
     private final int _qPort;
     private volatile boolean _isRunning;
     private volatile boolean _hasBootstrapped;
-    /** bootstrap */
-    private static final String BOOTSTRAP_SERVER = "http://i2pboot.biglybt.com:60000/?getNodes=true";
+    /** bootstrap — empty = disabled (no known I2P-reachable bootstrap URL yet; DHT relies on the persisted routing table) */
+    private static final String BOOTSTRAP_SERVER = "";
     private static final long BOOTSTRAP_PERIOD = 30*60*1000;
     private static final long BOOTSTRAP_RETRY_DELAY = 2*60*1000;
     private long _lastBootstrapAttempt;
@@ -429,11 +429,17 @@ public class KRPC implements DatagramListener, DHT {
 
     /**
      *  Try to bootstrap the DHT by fetching known nodes from the bootstrap server.
-     *  Uses biglybt's public I2P DHT bootstrap server.
      *  Rate-limited to avoid hammering the server.
+     *  The clearnet form (i2pboot.biglybt.com:60000) is deliberately NOT used:
+     *  a direct HTTP fetch would leak the real IP and DNS queries. Fetching
+     *  goes over the I2P transport (DataFetcher SPI) when a URL is configured.
      */
     @SuppressWarnings("unchecked")
     private void bootstrap() {
+        if (BOOTSTRAP_SERVER.isEmpty()) {
+            logDebug("Bootstrap disabled (no bootstrap URL configured)");
+            return;
+        }
         long now = _context.clock().now();
         long delay = _consecBootstrapFails > 0 ?
             BOOTSTRAP_RETRY_DELAY * (1L << Math.min(_consecBootstrapFails, 5)) : 0;
@@ -444,16 +450,21 @@ public class KRPC implements DatagramListener, DHT {
         _lastBootstrapAttempt = now;
         logInfo("Fetching bootstrap nodes from " + BOOTSTRAP_SERVER);
         postEvent(DhtEvent.Type.BOOTSTRAP_START, "Fetching bootstrap nodes", null, -1, _knownNodes.size());
-        InputStream is = null;
-        HttpURLConnection conn = null;
+        /*
+         * Bootstrap must go over the I2P transport — never clearnet. The
+         * DataFetcher SPI routes through the configured transport; without
+         * one wired, fail closed instead of leaking the real IP/DNS.
+         */
+        DataFetcher fetcher = _context instanceof ClientContext
+                ? ((ClientContext) _context).getDataFetcher() : null;
+        if (fetcher == null) {
+            logWarn("Bootstrap skipped: no DataFetcher wired (I2P transport not available)");
+            _consecBootstrapFails++;
+            return;
+        }
         try {
-            URL url = new URL(BOOTSTRAP_SERVER);
-            conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(30*1000);
-            conn.setReadTimeout(30*1000);
-            conn.connect();
-            is = conn.getInputStream();
-            BDecoder dec = new BDecoder(is);
+            byte[] body = fetcher.fetch(BOOTSTRAP_SERVER, 1 << 20, 60_000, 2);
+            BDecoder dec = new BDecoder(new ByteArrayInputStream(body));
             BEValue bev = dec.bdecodeMap();
             Map<String, BEValue> root = bev.getMap();
             BEValue nodesVal = root.get("nodes");
@@ -499,9 +510,6 @@ public class KRPC implements DatagramListener, DHT {
         } catch (Exception e) {
             _consecBootstrapFails++;
             logWarn("Bootstrap failed (attempt " + _consecBootstrapFails + "): " + e.getMessage());
-        } finally {
-            if (is != null) try { is.close(); } catch (IOException ignored) {}
-            if (conn != null) conn.disconnect();
         }
     }
 

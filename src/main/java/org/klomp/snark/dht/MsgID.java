@@ -23,7 +23,10 @@ class MsgID extends ByteArray {
         super(null);
         byte[] data = new byte[MY_TOK_LEN];
         ctx.random().nextBytes(data);
-        setData(data);
+        // assign directly: setData() validates against length(), which is
+        // 0 while _data is null (ByteArray semantics) — same lesson as
+        // the ByteArray(byte[]) ctor fix (session 1)
+        _data = data;
         setValid(MY_TOK_LEN);
     }
 

@@ -93,6 +93,12 @@ public class Peer implements Comparable<Peer>, BandwidthListener
   //private static final long OPTION_AZMP      = 0x1000000000000000l;
   // hybrid support TODO
   private static final long OPTION_V2        = 0x0000000000000010L;
+
+  /** inbound: how long to wait for the initiator's first post-handshake
+   *  message (which carries the ACK that fully establishes the I2P
+   *  stream) before starting the writer. Tuned for slow paths (the
+   *  phone's i2pd round-trip was 1-7s). */
+  private static final long INCOMING_ACCEPT_WAIT = 30*1000;
   private long options;
   private final boolean _isIncoming;
   private int _totalCommentsSent;
@@ -309,22 +315,48 @@ public class Peer implements Comparable<Peer>, BandwidthListener
         state = s;
         magnetState = mState;
         connected = ctx.now();
+        // INCOMING-CONNECTION FIX (2026-07-31): the I2P streaming lib marks
+        // an accepted connection "connected" only when the initiator's ACK
+        // arrives (it rides on the peer's first post-handshake message).
+        // Starting the writer before that makes its first flush hit
+        // packetSendChoke()'s !connected branch, which THROWS "Socket
+        // closed"; PeerConnectionOut's finally then calls peer.disconnect(),
+        // closing the stream under the reader, which EOFs at its first read
+        // — the failure seen on every inbound connection. Wait for the
+        // peer's first message (non-consuming) before starting the writer.
+        if (din != null) {
+            long deadline = ctx.now() + INCOMING_ACCEPT_WAIT;
+            while (din.available() == 0 && ctx.now() < deadline) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        // Start the writer BEFORE the app-visible connected() callback:
+        // the queued extension handshake + bitfield must reach the peer
+        // even if the callback rejects the connection. Otherwise the
+        // rejection closes the stream with nothing flushed, leaving the
+        // far end with an unexplained EOF right after the BT handshake.
+        out.startup();
         listener.connected(this);
   
         if (_log.shouldLog(Log.DEBUG))
             _log.debug("Start running the reader with " + toString());
         // Use this thread for running the incoming connection.
         // The outgoing connection creates its own Thread.
-        out.startup();
         Thread.currentThread().setName("Snark reader from " + peerID);
         s.in.run();
       }
     catch(IOException eofe)
       {
-        // Ignore, probably just the other side closing the connection.
-        // Or refusing the connection, timing out, etc.
-        if (_log.shouldLog(Log.DEBUG))
-            _log.debug(this.toString(), eofe);
+        // The far end closed the connection, refused it, timed out, or a
+        // protocol error killed the reader. INFO so the drop reason is
+        // visible in logcat (this is where a peer vanishes from the UI).
+        if (_log.shouldLog(Log.INFO))
+            _log.info("Peer connection ended " + this + ": " + eofe, eofe);
       }
     catch(Throwable t)
       {

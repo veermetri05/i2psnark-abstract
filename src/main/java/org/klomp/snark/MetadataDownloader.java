@@ -129,7 +129,10 @@ public class MetadataDownloader {
         try {
             socket = connector.connect(dest);
         } catch (IOException ie) {
-            String msg = "Failed to connect to peer: " + ie.getMessage();
+            // String.valueOf() keeps the exception class when getMessage()
+            // is null (EOFException etc.) so the caller can distinguish
+            // a closed stream from a protocol rejection.
+            String msg = "Failed to connect to peer: " + ie;
             fire(listener, new MetadataEvent(MetadataEvent.Phase.PEER_FAILED, infohash, dest, 1,
                     0, 0, 0, 0, -1, msg, msg, elapsed(start), null));
             throw new IOException(msg, ie);
@@ -148,12 +151,12 @@ public class MetadataDownloader {
             return doDownload(socket, infohash, handshakeTimeoutMs, readTimeoutMs, listener, start);
         } catch (IOException e) {
             fire(listener, new MetadataEvent(MetadataEvent.Phase.PEER_FAILED, infohash, dest, 1,
-                    0, 0, 0, 0, -1, e.getMessage(), e.getMessage(), elapsed(start), null));
+                    0, 0, 0, 0, -1, String.valueOf(e), String.valueOf(e), elapsed(start), null));
             throw e;
         } catch (Exception e) {
-            IOException ioe = new IOException("Metadata download failed: " + e.getMessage(), e);
+            IOException ioe = new IOException("Metadata download failed: " + e, e);
             fire(listener, new MetadataEvent(MetadataEvent.Phase.PEER_FAILED, infohash, dest, 1,
-                    0, 0, 0, 0, -1, ioe.getMessage(), ioe.getMessage(), elapsed(start), null));
+                    0, 0, 0, 0, -1, String.valueOf(ioe), String.valueOf(ioe), elapsed(start), null));
             throw ioe;
         } finally {
             try {
@@ -198,7 +201,7 @@ public class MetadataDownloader {
             }
         }
         String msg = "All " + peers.size() + " peers failed" +
-                     (lastError != null ? ": " + lastError.getMessage() : "");
+                     (lastError != null ? ": " + lastError : "");
         fire(listener, new MetadataEvent(MetadataEvent.Phase.FAILED, infohash, null, attempt,
                 0, 0, 0, 0, -1, msg, msg, 0, null));
         throw lastError != null ? lastError : new IOException(msg);
@@ -253,9 +256,12 @@ public class MetadataDownloader {
         HandshakeResult hs = recvExtensionHandshake(din, handshakeTimeoutMs);
         int peerMetaMsgId = hs.metaMsgId;
         int metadataSize = hs.metadataSize;
+        String extMsg = "Peer supports ut_metadata (msg id " + peerMetaMsgId + "), metadata_size=" + metadataSize;
+        if (hs.client != null && !hs.client.isEmpty())
+            extMsg += ", client='" + hs.client + "'";
         fire(listener, new MetadataEvent(MetadataEvent.Phase.EXTENSION_HANDSHAKE, infohash, null, 1,
                 0, 0, 0, 0, metadataSize,
-                "Peer supports ut_metadata, metadata_size=" + metadataSize, null, elapsed(start), null));
+                extMsg, null, elapsed(start), null));
 
         if (metadataSize <= 0 || metadataSize > MAX_METADATA_SIZE)
             throw new IOException("Invalid or missing metadata_size: " + metadataSize);
@@ -425,9 +431,11 @@ public class MetadataDownloader {
     private static class HandshakeResult {
         final int metaMsgId;
         final int metadataSize;
-        HandshakeResult(int metaMsgId, int metadataSize) {
+        final String client;
+        HandshakeResult(int metaMsgId, int metadataSize, String client) {
             this.metaMsgId = metaMsgId;
             this.metadataSize = metadataSize;
+            this.client = client;
         }
     }
 
@@ -475,7 +483,18 @@ public class MetadataDownloader {
                     BEValue sizeVal = map.get("metadata_size");
                     int metaSize = sizeVal != null ? sizeVal.getInt() : -1;
 
-                    return new HandshakeResult(msgIdForMeta, metaSize);
+                    // Get client name/version ("v" field, optional)
+                    String client = null;
+                    BEValue clientVal = map.get("v");
+                    if (clientVal != null) {
+                        try {
+                            client = clientVal.getString();
+                        } catch (Exception e) {
+                            client = null; // non-UTF8 or malformed — ignore
+                        }
+                    }
+
+                    return new HandshakeResult(msgIdForMeta, metaSize, client);
                 }
             } else {
                 // Non-extension or non-handshake — skip

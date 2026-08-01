@@ -24,6 +24,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
@@ -1013,6 +1014,34 @@ public class Snark
     }
 
     /**
+     *  Per-piece availability (connected peers + self).
+     *  Approximate: counts only connected peers, see
+     *  {@link PeerCoordinator#getPiecesAvailability()}.
+     *
+     *  @return array of size metainfo pieces; empty array if no metainfo
+     *  @since 0.9.x
+     */
+    public int[] getPiecesAvailability() {
+        PeerCoordinator coord = coordinator;
+        if (coord != null)
+            return coord.getPiecesAvailability();
+        if (meta == null)
+            return new int[0];
+        int[] rv = new int[meta.getPieces()];
+        if (storage != null) {
+            BitField bf = storage.getBitField();
+            if (bf != null) {
+                int n = Math.min(rv.length, bf.size());
+                for (int i = 0; i < n; i++) {
+                    if (bf.get(i))
+                        rv[i]++;
+                }
+            }
+        }
+        return rv;
+    }
+
+    /**
      *  Does not account (i.e. includes) for skipped files.
      *  @return number of pieces still needed (magnet mode or not), or -1 if unknown
      *  @since 0.8.4
@@ -1338,8 +1367,70 @@ public class Snark
   public void replaceMetaInfo(MetaInfo metainfo) {
       meta = metainfo;
       TrackerClient tc = trackerclient;
-      if (tc != null)
+      if (tc != null) {
+          // keep the announce source current even when the tracker
+          // client is running (reinitialize() is a no-op then — the
+          // app pushes the live list via replaceTrackerURLs())
+          tc.setMetaInfo(metainfo);
           tc.reinitialize();
+      }
+  }
+
+  /**
+   *  Add one tracker URL at runtime (GUI "add tracker").
+   *  Safe while running; also works before the first start.
+   */
+  public void addTrackerURL(String url) {
+      TrackerClient tc = trackerclient;
+      if (tc != null)
+          tc.addTracker(url);
+  }
+
+  /**
+   *  Remove one tracker URL at runtime (GUI "delete tracker").
+   *  Matches metainfo trackers too.
+   */
+  public void removeTrackerURL(String url) {
+      TrackerClient tc = trackerclient;
+      if (tc != null)
+          tc.removeTracker(url);
+  }
+
+  /**
+   *  Replace the whole tracker list at runtime (GUI "replace").
+   *  Safe while running; also works before the first start.
+   */
+  public void replaceTrackerURLs(Collection<String> urls) {
+      TrackerClient tc = trackerclient;
+      if (tc != null)
+          tc.replaceTrackers(urls);
+  }
+
+  /**
+   *  Force an immediate tracker announce pass (GUI "announce now").
+   *  No-op before the torrent's first start (no TrackerClient yet).
+   */
+  public void announceNow() {
+      TrackerClient tc = trackerclient;
+      if (tc != null)
+          tc.announceNow();
+  }
+
+  /**
+   *  Test accessor — package-private; the app reads trackers from
+   *  the MetaInfo, not from the tracker client.
+   */
+  TrackerClient getTrackerClient() {
+      return trackerclient;
+  }
+
+  /**
+   *  The engine context this Snark was built with. The app uses it to
+   *  detect tasks that outlived a transport reconnect (their context
+   *  is dead) and rebuild them on the new one.
+   */
+  public ClientContext getContext() {
+      return _ctx;
   }
 
   /**

@@ -103,6 +103,8 @@ public class FullClientLoopbackTest {
     static class LoopTransport implements StreamConnector, StreamServer, PeerIdentityFactory {
         final LoopIdentity _local;
         final Map<Hash, LoopIdentity> _known = new ConcurrentHashMap<Hash, LoopIdentity>();
+        /** named hosts resolved by the fake naming service (trackers) */
+        final Map<String, LoopIdentity> _names = new ConcurrentHashMap<String, LoopIdentity>();
         final LinkedBlockingQueue<Stream> _inbound = new LinkedBlockingQueue<Stream>();
         volatile java.util.function.Consumer<Stream> _seederHandler;
         volatile boolean _closed;
@@ -120,6 +122,11 @@ public class FullClientLoopbackTest {
             if (DataHelper.eq(sha256Hash, _local._hash))
                 return _local;
             return _known.get(Hash.create(sha256Hash));
+        }
+        @Override public PeerIdentity lookupName(String name, long timeoutMs) {
+            if (name == null)
+                return null;
+            return _names.get(name.toLowerCase(java.util.Locale.US));
         }
         @Override public boolean isClosed() { return _closed; }
 
@@ -189,6 +196,8 @@ public class FullClientLoopbackTest {
         final byte[] _peerId;
         final byte[][] _pieces;   // piece data by index
         final AtomicInteger _requestsServed = new AtomicInteger();
+        /** per-request artificial delay (ms); 0 = serve as fast as possible */
+        volatile int _requestDelayMs;
 
         volatile byte[] _receivedInfohash;
 
@@ -250,6 +259,13 @@ public class FullClientLoopbackTest {
                     din.readFully(msg);
                     switch (msg[0]) {
                         case Message.REQUEST: {
+                            if (_requestDelayMs > 0) {
+                                try {
+                                    Thread.sleep(_requestDelayMs);
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                }
+                            }
                             int piece = (int) DataHelper.fromLong(msg, 1, 4);
                             int begin = (int) DataHelper.fromLong(msg, 5, 4);
                             int length = (int) DataHelper.fromLong(msg, 9, 4);
@@ -383,6 +399,38 @@ public class FullClientLoopbackTest {
         info.put("name", "multi");
         info.put("piece length", Integer.valueOf(PIECE_LEN));
         info.put("files", files);
+        byte[] hashes = new byte[pieces.length * 20];
+        for (int i = 0; i < pieces.length; i++)
+            System.arraycopy(SHA1.hash(pieces[i]), 0, hashes, i * 20, 20);
+        info.put("pieces", hashes);
+        return SHA1.hash(BEncoder.bencode(info));
+    }
+
+    /** Single-file torrent: file.bin (all pieces). */
+    static byte[] buildSingleFileTorrent(byte[][] pieces) throws Exception {
+        Map<String, Object> info = new HashMap<String, Object>();
+        info.put("name", "single.bin");
+        info.put("piece length", Integer.valueOf(PIECE_LEN));
+        info.put("length", Long.valueOf((long) pieces.length * PIECE_LEN));
+        byte[] hashes = new byte[pieces.length * 20];
+        for (int i = 0; i < pieces.length; i++)
+            System.arraycopy(SHA1.hash(pieces[i]), 0, hashes, i * 20, 20);
+        info.put("pieces", hashes);
+        Map<String, Object> top = new HashMap<String, Object>();
+        byte[] trackerKey = new byte[32];
+        for (int i = 0; i < 32; i++)
+            trackerKey[i] = (byte) (150 + i);
+        top.put("announce", "http://" + org.klomp.snark.data.Base32.encode(trackerKey) + ".b32.i2p/announce");
+        top.put("info", info);
+        return BEncoder.bencode(top);
+    }
+
+    /** The single-file torrent infohash = SHA-1 of the bencoded info dict alone. */
+    static byte[] singleFileInfohashOf(byte[][] pieces) throws Exception {
+        Map<String, Object> info = new HashMap<String, Object>();
+        info.put("name", "single.bin");
+        info.put("piece length", Integer.valueOf(PIECE_LEN));
+        info.put("length", Long.valueOf((long) pieces.length * PIECE_LEN));
         byte[] hashes = new byte[pieces.length * 20];
         for (int i = 0; i < pieces.length; i++)
             System.arraycopy(SHA1.hash(pieces[i]), 0, hashes, i * 20, 20);
@@ -704,6 +752,39 @@ public class FullClientLoopbackTest {
                 _error = e.toString();
                 _done.countDown();
             }
+        }
+    }
+
+    // ── Naming (trackers) ────────────────────────────────────────────
+
+    /**
+     *  Named-host resolution via the transport's naming service
+     *  ({@code lookupName} — SAM NAMING LOOKUP / addressbook):
+     *  {@code ClientContext.getDestination()} must route plain
+     *  {@code .i2p} names there instead of failing.
+     */
+    @Test
+    public void namedHostResolution() throws Exception {
+        File work = Files.createTempDirectory("loop-named").toFile();
+        try {
+            LoopTransport transport = new LoopTransport(new byte[32]);
+            byte[] trackerHash = new byte[32];
+            for (int i = 0; i < 32; i++)
+                trackerHash[i] = (byte) (i + 1);
+            transport._names.put("tracker2.postman.i2p", new LoopIdentity(trackerHash));
+            ClientContext ctx = makeContext(transport, work);
+
+            PeerIdentity resolved = ctx.getDestination("tracker2.postman.i2p");
+            assertNotNull("named host must resolve via the naming service", resolved);
+            assertEquals("resolved identity must be the naming service's answer",
+                    Base64.encode(trackerHash), resolved.toBase64());
+
+            assertNull("unknown names must resolve to null",
+                    ctx.getDestination("does.not.exist.i2p"));
+            assertNull("non-.i2p garbage must resolve to null",
+                    ctx.getDestination("not-a-destination"));
+        } finally {
+            deleteRecursive(work);
         }
     }
 }

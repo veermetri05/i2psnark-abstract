@@ -521,11 +521,109 @@ public class Storage implements Closeable
   }
 
   /**
+   *  Bytes of completed pieces that fall inside the file's range.
+   *  Piece-granular: only fully downloaded pieces count (partial pieces
+   *  count 0 — same granularity as libtorrent's file_progress). After a
+   *  restart, bytes from a piece that was partially downloaded at
+   *  shutdown are not counted until that piece completes.
+   *
+   *  @param fileIndex as obtained from indexOf
+   *  @return bytes on disk for the file, 0 on error
+   *  @since 0.9.x
+   */
+  public long getFileReceivedBytes(int fileIndex) {
+      if (fileIndex < 0 || fileIndex >= _torrentFiles.size())
+          return 0;
+      long start = 0;
+      for (int i = 0; i < fileIndex; i++)
+          start += _torrentFiles.get(i).length;
+      return receivedBytes(start, _torrentFiles.get(fileIndex).length);
+  }
+
+  /**
+   *  Bytes of completed pieces for every file, in metainfo order.
+   *  Piece-granular, see {@link #getFileReceivedBytes(int)}.
+   *  Empty array when the storage is not checked yet.
+   *
+   *  @since 0.9.x
+   */
+  public long[] getFileReceivedBytes() {
+      long[] rv = new long[_torrentFiles.size()];
+      long bytes = 0;
+      for (int i = 0; i < _torrentFiles.size(); i++) {
+          rv[i] = receivedBytes(bytes, _torrentFiles.get(i).length);
+          bytes += _torrentFiles.get(i).length;
+      }
+      return rv;
+  }
+
+  /**
+   *  Sum of {@link #getFileReceivedBytes(int)} over the files that are
+   *  not skipped (priority &gt;= {@link #PRIORITY_NORMAL}). This is the
+   *  byte-accurate, skip-aware counterpart of the bitfield piece count:
+   *  it survives restarts (derived from the bitfield, not a session
+   *  counter) and matches what the engine is trying to download.
+   *
+   *  @since 0.9.x
+   */
+  public long getWantedReceivedBytes() {
+      long rv = 0;
+      long bytes = 0;
+      for (int i = 0; i < _torrentFiles.size(); i++) {
+          TorrentFile tf = _torrentFiles.get(i);
+          if (tf.priority >= PRIORITY_NORMAL)
+              rv += receivedBytes(bytes, tf.length);
+          bytes += tf.length;
+      }
+      return rv;
+  }
+
+  /**
+   *  Total length of the files that are not skipped (priority &gt;=
+   *  {@link #PRIORITY_NORMAL}). File-granular: unlike {@link
+   *  #getSkippedLength()} it counts a wanted file's WHOLE length even
+   *  when part of it is already on disk, so the value is stable across
+   *  deselect/re-select and never shrinks as bytes arrive. This is the
+   *  denominator that makes the UI progress reach exactly 100% when all
+   *  wanted files are complete.
+   *
+   *  @return 0 when all files are skipped, or when not checked yet
+   *  @since 0.9.x
+   */
+  public long getWantedLength() {
+      long rv = 0;
+      for (TorrentFile tf : _torrentFiles) {
+          if (tf.priority >= PRIORITY_NORMAL)
+              rv += tf.length;
+      }
+      return rv;
+  }
+
+  /**
+   *  Bytes of completed pieces that overlap the data range
+   *  [start, start + length) of the torrent.
+   *  Piece-granular, see {@link #getFileReceivedBytes(int)}.
+   */
+  private long receivedBytes(long start, long length) {
+      if (length <= 0 || start >= total_length)
+          return 0;
+      long end = Math.min(start + length, total_length);
+      long rv = 0;
+      int pc = (int) (start / piece_size);
+      for (long j = ((long) pc) * piece_size; j < end && pc < pieces; j += piece_size, pc++) {
+          if (bitfield.get(pc)) {
+              rv += Math.min(end, j + getPieceLength(pc)) - Math.max(start, j);
+          }
+      }
+      return rv;
+  }
+
+  /**
    *  @param fileIndex as obtained from indexOf
    *  @since 0.8.1
    */
   public int getPriority(int fileIndex) {
-      if (complete() || metainfo.getFiles() == null)
+      if (complete())
           return PRIORITY_NORMAL;
       if (fileIndex < 0 || fileIndex >= _torrentFiles.size())
           return PRIORITY_NORMAL;
@@ -540,7 +638,7 @@ public class Storage implements Closeable
    *  @since 0.8.1
    */
   public void setPriority(int fileIndex, int pri) {
-      if (complete() || metainfo.getFiles() == null)
+      if (complete())
           return;
       if (fileIndex < 0 || fileIndex >= _torrentFiles.size())
           return;
@@ -549,15 +647,13 @@ public class Storage implements Closeable
 
   /**
    *  Get the file priorities array.
-   *  @return null on error, if complete, or if only one file
+   *  @return null on error, or if complete
    *  @since 0.8.1
    */
   public int[] getFilePriorities() {
       if (complete())
           return null;
       int sz = _torrentFiles.size();
-      if (sz <= 1)
-          return null;
       int[] priorities = new int[sz];
       for (int i = 0; i < sz; i++) {
           priorities[i] = _torrentFiles.get(i).priority;
@@ -646,11 +742,11 @@ public class Storage implements Closeable
    *  Set the piece priority to the highest priority
    *  of all files spanning the piece.
    *  Caller must pass array to the PeerCoordinator.
-   *  @return null on error, if complete, or if only one file and inOrder not set.
+   *  @return null on error, or if complete
    *  @since 0.8.1
    */
   public int[] getPiecePriorities() {
-      if (complete() || (metainfo.getFiles() == null && !_inOrder))
+      if (complete())
           return null;
       int[] rv = new int[metainfo.getPieces()];
       int file = 0;
@@ -699,7 +795,7 @@ public class Storage implements Closeable
    *  This is not the same as the total of all skipped files,
    *  since pieces may span multiple files.
    *
-   *  @return 0 on error, if complete, or if only one file
+   *  @return 0 on error, or if complete
    *  @since 0.9.24
    */
   public long getSkippedLength() {

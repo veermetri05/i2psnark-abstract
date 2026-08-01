@@ -27,6 +27,7 @@ import java.io.OutputStream;
 import java.net.ConnectException;
 
 import org.klomp.snark.spi.StreamServer;
+import org.klomp.snark.spi.PeerIdentity;
 import org.klomp.snark.spi.Stream;
 import org.klomp.snark.data.Hash;
 import org.klomp.snark.spi.Log;
@@ -36,7 +37,7 @@ import org.klomp.snark.util.ObjectCounter;
 /**
  * Accepts connections on a I2PServerSocket and routes them to PeerAcceptors.
  */
-class ConnectionAcceptor implements Runnable
+public class ConnectionAcceptor implements Runnable
 {
   private final Log _log = Logs.getLog(ConnectionAcceptor.class);
   private final PeerAcceptor peeracceptor;
@@ -169,12 +170,19 @@ class ConnectionAcceptor implements Runnable
             if (socket == null) {
                     continue;
             } else {
-                if (socket.getPeer().equals(_ctx.getMyDestination())) {
+                if (socket.getPeer() != null && socket.getPeer().equals(_ctx.getMyDestination())) {
                     _log.error("Incoming connection from myself");
                     socket.close();
                     continue;
                 }
-                Hash h = socket.getPeer().calculateHash();
+                PeerIdentity peer = socket.getPeer();
+                if (peer == null) {
+                    if (_log.shouldWarn())
+                        _log.warn("Dropping connection with unknown peer identity");
+                    socket.close();
+                    continue;
+                }
+                Hash h = peer.calculateHash();
                 if (socket.getLocalPort() == 80) {
                      _badCounter.increment(h);
                     if (_log.shouldLog(Log.WARN))

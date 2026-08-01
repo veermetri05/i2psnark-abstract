@@ -370,6 +370,43 @@ public class PeerCoordinator implements PeerListener, BandwidthListener
         return new ArrayList<Peer>(peers);
   }
 
+  /**
+   *  Per-piece availability: the number of connected peers that hold the
+   *  piece, plus one if we hold it. Approximate by design — I2PSnark has
+   *  no swarm-wide peer set, only connected peers (libtorrent's
+   *  availability has the same connected/known-peer basis).
+   *
+   *  @return array of size metainfo.getPieces(); empty array if no metainfo
+   *  @since 0.9.x
+   */
+  public int[] getPiecesAvailability() {
+      if (metainfo == null || storage == null)
+          return new int[0];
+      int[] rv = new int[metainfo.getPieces()];
+      BitField ours = storage.getBitField();
+      if (ours != null) {
+          int n = Math.min(rv.length, ours.size());
+          for (int i = 0; i < n; i++) {
+              if (ours.get(i))
+                  rv[i]++;
+          }
+      }
+      for (Peer p : peerList()) {
+          PeerState s = p.state;
+          if (s == null)
+              continue;
+          BitField bf = s.bitfield;
+          if (bf == null)
+              continue;
+          int n = Math.min(rv.length, bf.size());
+          for (int i = 0; i < n; i++) {
+              if (bf.get(i))
+                  rv[i]++;
+          }
+      }
+      return rv;
+  }
+
   public byte[] getID()
   {
     return id;

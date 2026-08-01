@@ -53,7 +53,9 @@ public class BandwidthManager implements BandwidthListener {
         // Allow down limit a little higher based on testing
         // Allow req limit a little higher still because it uses RED
         // so it actually kicks in sooner.
-        _req = new SyntheticREDQueue(_env, downLimit * 110 / 100);
+        // (long math: the *110/100 overflows int for large limits —
+        //  e.g. Integer.MAX_VALUE from the app's "unlimited")
+        _req = new SyntheticREDQueue(_env, (int) Math.min(downLimit * 110L / 100, Integer.MAX_VALUE));
     }
 
     /**
@@ -72,7 +74,8 @@ public class BandwidthManager implements BandwidthListener {
         int limit = (int) Math.min(downLimit, Integer.MAX_VALUE);
         if (limit != getDownBWLimit()) {
             _down = new SyntheticREDQueue(_env, limit);
-            _req = new SyntheticREDQueue(_env, limit * 110 / 100);
+            // long math — see the ctor note
+            _req = new SyntheticREDQueue(_env, (int) Math.min(limit * 110L / 100, Integer.MAX_VALUE));
         }
     }
 

@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import org.klomp.snark.data.DataHelper;
 import org.klomp.snark.data.Hash;
@@ -123,6 +124,8 @@ public class TrackerClient implements Runnable {
   private boolean completed;
   private volatile boolean _fastUnannounce;
   private long lastDHTAnnounce;
+  // CopyOnWrite: the app can add/remove trackers at runtime (GUI
+  // tracker edit) while the announce loop iterates this list.
   private final List<TCTracker> trackers;
   private final List<TCTracker> backupTrackers;
   private long _startedOn;
@@ -150,8 +153,84 @@ public class TrackerClient implements Runnable {
     this.port = PORT; //(port == -1) ? 9 : port;
     this.infoHash = urlencode(hash);
     this.peerID = urlencode(snark.getID());
-    this.trackers = new ArrayList<TCTracker>(2);
-    this.backupTrackers = new ArrayList<TCTracker>(2);
+    this.trackers = new CopyOnWriteArrayList<TCTracker>();
+    this.backupTrackers = new CopyOnWriteArrayList<TCTracker>();
+  }
+
+  /**
+   *  Swap the announce source after a tracker edit
+   *  ({@link Snark#replaceMetaInfo(MetaInfo)}). Keeps {@code setup()}
+   *  and the private-torrent checks current for torrents edited
+   *  before their first start.
+   */
+  public synchronized void setMetaInfo(MetaInfo meta) {
+      this.meta = meta;
+  }
+
+  // ── Runtime tracker editing (GUI add/replace/delete) ─────────────
+
+  /**
+   *  Add one announce URL while running (or before the first start).
+   *  Validates exactly like {@code setup()}; a duplicate or invalid
+   *  URL is silently skipped. The new tracker is announced on the
+   *  next loop pass (lastRequestTime 0).
+   */
+  public synchronized void addTracker(String url) {
+      if (url == null)
+          return;
+      Set<String> keys = new HashSet<String>(8);
+      for (TCTracker tr : trackers) {
+          String k = getTrackerKey(tr.announce);
+          if (k != null)
+              keys.add(k);
+      }
+      if (isNewValidTracker(keys, url)) {
+          trackers.add(new TCTracker(url, trackers.isEmpty()));
+          if (_log.shouldLog(Log.DEBUG))
+              _log.debug("Added tracker: [" + url + "] for " + snark.getBaseName());
+      }
+  }
+
+  /**
+   *  Remove one announce URL while running. Matches by the same
+   *  dedup key as {@code setup()} (host hash for b32/b64 hosts,
+   *  lowercased name for named hosts), so removing a metainfo
+   *  tracker works too. The tracker is stopped and dropped from the
+   *  list; it will not be announced again this session.
+   */
+  public synchronized void removeTracker(String url) {
+      if (url == null)
+          return;
+      String key = getTrackerKey(url);
+      if (key == null)
+          return;
+      List<TCTracker> victims = new ArrayList<TCTracker>(2);
+      for (TCTracker tr : trackers) {
+          if (key.equals(getTrackerKey(tr.announce))) {
+              tr.stop = true;
+              victims.add(tr);
+          }
+      }
+      if (!victims.isEmpty()) {
+          trackers.removeAll(victims);
+          if (_log.shouldLog(Log.DEBUG))
+              _log.debug("Removed tracker: [" + url + "] for " + snark.getBaseName());
+      }
+  }
+
+  /**
+   *  Replace the whole runtime tracker list (GUI "replace" — the
+   *  given URLs become the only trackers). Safe while running
+   *  (CopyOnWrite list, loop checks {@code tr.stop}).
+   */
+  public synchronized void replaceTrackers(Collection<String> urls) {
+      for (TCTracker tr : trackers)
+          tr.stop = true;
+      trackers.clear();
+      backupTrackers.clear();
+      if (urls != null)
+          for (String url : urls)
+              addTracker(url);
   }
 
   public synchronized void start() {
@@ -208,6 +287,31 @@ public class TrackerClient implements Runnable {
 
   private void queueLoop(long delay) {
       new Runner(delay).schedule();
+  }
+
+  /**
+   *  Force an immediate announce pass (GUI "announce now").
+   *
+   *  If the loop is queued (sleeping between passes) the pending event
+   *  is cancelled and a zero-delay pass is scheduled; if the loop is
+   *  currently running (short sleep), the thread is interrupted so the
+   *  next iteration starts immediately.
+   */
+  public synchronized void announceNow() {
+      if (stop)
+          return;
+      if (_log.shouldLog(Log.DEBUG))
+          _log.debug("Announce now: " + _threadName);
+      org.klomp.snark.spi.Cancellable e = _event;
+      if (e != null) {
+          e.cancel();
+          _event = null;
+      }
+      Thread t = _thread;
+      if (t != null)
+          t.interrupt();
+      if (_thread == null)
+          new Runner(0).schedule();
   }
 
   private class Runner implements Runnable {
@@ -291,6 +395,17 @@ public class TrackerClient implements Runnable {
   }
 
   /**
+   *  Test/debug accessor: the current runtime announce list.
+   *  Package-private; the app reads trackers from the MetaInfo.
+   */
+  synchronized List<String> trackerURLs() {
+      List<String> rv = new ArrayList<String>(trackers.size());
+      for (TCTracker tr : trackers)
+          rv.add(tr.announce);
+      return rv;
+  }
+
+  /**
    *  Do this one time only (not every time it is started).
    *  Unless torrent was edited.
    *  @since 0.9.1
@@ -306,11 +421,18 @@ public class TrackerClient implements Runnable {
         primary = meta.getAnnounce();
     else if (additionalTrackerURL != null)
         primary = additionalTrackerURL;
-    Set<Hash> trackerHashes = new HashSet<Hash>(8);
+    Set<String> trackerKeys = new HashSet<String>(8);
+    // trackers added at runtime before the first start (GUI edit on a
+    // paused torrent): setup() must not duplicate them
+    for (TCTracker tr : trackers) {
+        String k = getTrackerKey(tr.announce);
+        if (k != null)
+            trackerKeys.add(k);
+    }
 
     // primary tracker
     if (primary != null) {
-        if (isNewValidTracker(trackerHashes, primary)) {
+        if (isNewValidTracker(trackerKeys, primary)) {
             trackers.add(new TCTracker(primary, true));
             if (_log.shouldLog(Log.DEBUG))
                 _log.debug("Announce: [" + primary + "] infoHash: " + infoHash);
@@ -344,7 +466,7 @@ public class TrackerClient implements Runnable {
             }
         }
         for (String url : urls) {
-            if (!isNewValidTracker(trackerHashes, url))
+            if (!isNewValidTracker(trackerKeys, url))
                 continue;
              // first one is primary if we don't have a primary
              trackers.add(new TCTracker(url, trackers.isEmpty()));
@@ -358,7 +480,7 @@ public class TrackerClient implements Runnable {
         List<String> tlist = _ctx.getBackupTrackers();
         for (int i = 0; i < tlist.size(); i++) {
             String url = tlist.get(i);
-            if (!isNewValidTracker(trackerHashes, url))
+            if (!isNewValidTracker(trackerKeys, url))
                 continue;
             backupTrackers.add(new TCTracker(url, false));
             if (_log.shouldLog(Log.DEBUG))
@@ -380,15 +502,16 @@ public class TrackerClient implements Runnable {
    *  @return true if ann is valid and new; adds to existing if returns true
    *  @since 0.9.5
    */
-  private boolean isNewValidTracker(Set<Hash> existing, String ann) {
-      Hash h = getHostHash(ann);
-      if (h == null) {
+  private boolean isNewValidTracker(Set<String> existing, String ann) {
+      String key = getTrackerKey(ann);
+      if (key == null) {
           if (_log.shouldLog(Log.WARN))
               _log.warn("Bad announce URL: [" + ann + "] for torrent " + snark.getBaseName());
           return false;
       }
       // comment this out if tracker.welterde.i2p upgrades
-      if (h.equals(DSA_ONLY_TRACKER)) {
+      Hash h = getHostHash(ann);
+      if (h != null && h.equals(DSA_ONLY_TRACKER)) {
           PeerIdentity dest = _ctx.getMyDestination();
           if (dest != null && !dest.isDSA()) {
               if (_log.shouldLog(Log.WARN))
@@ -401,12 +524,73 @@ public class TrackerClient implements Runnable {
               _log.info("Not using announce URL, we have enough: [" + ann + "] for torrent " + snark.getBaseName());
           return false;
       }
-      boolean rv = existing.add(h);
+      boolean rv = existing.add(key);
       if (!rv) {
           if (_log.shouldLog(Log.INFO))
              _log.info("Dup announce URL: [" + ann + "] for torrent " + snark.getBaseName());
       }
       return rv;
+  }
+
+  /**
+   *  Validate an announce URL and return a dedup key for it.
+   *
+   *  Hash hosts (b32/b64, incl. the {@code http://i2p/<b64>/} form)
+   *  key on the host hash; <b>named hosts</b> (e.g.
+   *  {@code tracker2.postman.i2p} — resolved via the transport's
+   *  naming service at announce time) key on the lowercased name.
+   *
+   *  @param ann an announce URL, non-null
+   *  @return the dedup key for i2p hosts only, null otherwise
+   */
+  private String getTrackerKey(String ann) {
+    URI url;
+    try {
+        url = new URI(ann);
+    } catch (URISyntaxException use) {
+        return null;
+    }
+    String scheme = url.getScheme();
+    if (!("http".equals(scheme) || (_ctx.udpEnabled() && "udp".equals(scheme))))
+        return null;
+    String host = url.getHost();
+    if (host == null) {
+        // URI can't handle b64dest or b64dest.i2p if it contains '~'
+        // but it doesn't throw an exception, just returns a null host
+        if (ann.startsWith("http://") && ann.length() >= 7 + 516 && ann.contains("~")) {
+            ann = ann.substring(7);
+            int slash = ann.indexOf('/');
+            if (slash >= 516) {
+                ann = ann.substring(0, slash);
+                if (ann.endsWith(".i2p"))
+                    ann = ann.substring(0, ann.length() - 4);
+                Hash h = ConvertToHash.getHash(ann);
+                return h != null ? h.toBase32() : null;
+            }
+        }
+        return null;
+    }
+    if (host.endsWith(".i2p")) {
+        String path = url.getPath();
+        if (path == null || !path.startsWith("/"))
+            return null;
+        Hash h = ConvertToHash.getHash(host);
+        if (h != null)
+            return h.toBase32();
+        // named host — accepted; the transport's naming service
+        // resolves it at announce time (SAM NAMING LOOKUP / addressbook)
+        return host.toLowerCase(Locale.US);
+    }
+    if (host.equals("i2p")) {
+        String path = url.getPath();
+        if (path == null || path.length() < 517 ||
+            !path.startsWith("/"))
+            return null;
+        String[] parts = DataHelper.split(path.substring(1), "[/\\?&;]", 2);
+        Hash h = ConvertToHash.getHash(parts[0]);
+        return h != null ? h.toBase32() : null;
+    }
+    return null;
   }
 
   /**

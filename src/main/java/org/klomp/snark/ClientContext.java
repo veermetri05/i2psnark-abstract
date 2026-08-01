@@ -277,7 +277,9 @@ public class ClientContext {
      *    <li>base32 + ".b32.i2p" → session lookup (efficient, primary)</li>
      *    <li>base64 key + ".i2p" (len &gt;= 520) → factory parse</li>
      *    <li>plain base64 → factory parse</li>
-     *    <li>other ".i2p" names (naming service) → unsupported, null</li>
+     *    <li>other ".i2p" names → transport naming service
+     *        ({@link Session#lookupName} — SAM NAMING LOOKUP / router
+     *        addressbook), null if no service or unknown</li>
      *  </ul>
      */
     public PeerIdentity getDestination(String ip) {
@@ -296,6 +298,15 @@ public class ClientContext {
                             log(ClientContext.class).warn("b32 lookup failed for " + ip, ise);
                         }
                     }
+                }
+                // named host — the transport's naming service
+                // (SAM NAMING LOOKUP / I2CP addressbook lookup)
+                try {
+                    PeerIdentity named = _connector.lookupName(ip, 15 * 1000);
+                    if (named != null)
+                        return named;
+                } catch (IOException ioe) {
+                    log(ClientContext.class).warn("Name lookup failed for " + ip, ioe);
                 }
                 log(ClientContext.class).info("No naming service for " + ip);
                 return null;
@@ -394,9 +405,30 @@ public class ClientContext {
         return _useDHT;
     }
 
-    /** Configure DHT usage */
-    public void setUseDHT(boolean yes) {
+    /** Configure DHT usage (starts/stops the running DHT live) */
+    public synchronized void setUseDHT(boolean yes) {
+        if (_useDHT == yes)
+            return;
         _useDHT = yes;
+        if (yes) {
+            // (re)start the DHT when the transport is up and a datagram
+            // transport is available; connect() re-checks the flag
+            if (connected() && _dht == null && _datagramTransportFactory != null) {
+                connect();
+                log(ClientContext.class).info("DHT enabled");
+            }
+        } else {
+            DHT dht = _dht;
+            _dht = null;
+            if (dht != null) {
+                try {
+                    dht.stop();
+                    log(ClientContext.class).info("DHT disabled");
+                } catch (RuntimeException e) {
+                    log(ClientContext.class).warn("DHT stop failed", e);
+                }
+            }
+        }
     }
 
     // ── Config ───────────────────────────────────────────────────────

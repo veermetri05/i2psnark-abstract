@@ -5,9 +5,11 @@ import static org.junit.Assert.*;
 
 import org.klomp.snark.data.Base64;
 import org.klomp.snark.data.Hash;
+import org.klomp.snark.spi.Environment;
 import org.klomp.snark.spi.PeerIdentity;
 import org.klomp.snark.spi.PeerIdentityFactory;
 import org.klomp.snark.spi.RandomSource;
+import org.klomp.snark.util.FileStorage;
 
 /**
  *  NodeInfo / NID tests — compact 54-byte format and the persistent
@@ -95,5 +97,34 @@ public class NodeInfoTest {
         assertFalse(nid.timeout());
         assertFalse(nid.timeout());
         assertTrue(nid.timeout()); // third failure
+    }
+
+    /**
+     *  Regression: the outgoing MsgID/Token ctors did
+     *  {@code super(null)} then {@code setData(data)} — but
+     *  {@code ByteArray.length()} is 0 while _data is null, so
+     *  {@code setData} threw "Bad data length: 8; required: 0" and
+     *  every DHT outbound query (sendQuery / announce) crashed the
+     *  KRPC thread. The loopback tests never ran the DHT, so this
+     *  only surfaced on a live router (BUG-002, live test 2026-07-31).
+     */
+    @Test
+    public void testMsgIDAndTokenOutgoing() {
+        Environment env = Environment.basic(new FileStorage(new java.io.File("build/tmp/dht-msgid-test")));
+        MsgID mID = new MsgID(env);
+        assertEquals(8, mID.length());
+        assertEquals(8, mID.getValid());
+        assertEquals(8, mID.getData().length);
+
+        Token tok = new Token(env);
+        assertEquals(8, tok.length());
+        assertEquals(8, tok.getValid());
+        assertEquals(8, tok.getData().length);
+
+        // incoming forms still fine
+        MsgID in = new MsgID(new byte[]{1, 2, 3, 4});
+        assertEquals(4, in.length());
+        Token tin = new Token(env, new byte[]{9, 8, 7});
+        assertEquals(3, tin.length());
     }
 }

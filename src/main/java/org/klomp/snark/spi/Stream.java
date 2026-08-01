@@ -18,7 +18,14 @@ public interface Stream {
     /** @return the output stream (null if the stream is closed) */
     OutputStream getOutputStream();
 
-    /** Set the read timeout in milliseconds (0 = infinite) */
+    /**
+     *  Set the read timeout in milliseconds.
+     *  <p><b>SPI contract: 0 = infinite (block forever).</b> Implementations
+     *  wrapping libraries with different conventions (e.g. net.i2p, where
+     *  0 = non-blocking and -1 = infinite) MUST translate so the contract
+     *  holds for callers, and {@link #getReadTimeout()} MUST return the
+     *  value in SPI terms (0 = infinite).
+     */
     void setReadTimeout(int timeoutMs);
 
     /** @return the current read timeout in milliseconds (0 = infinite, default) */

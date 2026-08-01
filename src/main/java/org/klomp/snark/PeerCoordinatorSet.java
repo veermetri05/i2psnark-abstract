@@ -12,7 +12,7 @@ import org.klomp.snark.data.SHA1Hash;
  * Each PeerCoordinator is added to the set from within the Snark (and removed
  * from it there too)
  */
-class PeerCoordinatorSet implements Iterable<PeerCoordinator> {
+public class PeerCoordinatorSet implements Iterable<PeerCoordinator> {
     private final Map<SHA1Hash, PeerCoordinator> _coordinators;
     
     public PeerCoordinatorSet() {
