@@ -1270,8 +1270,14 @@ public class KRPC implements DatagramListener, DHT {
                 logWarn("Not sending message, session is closed");
             return false;
         }
-        if (dest.calculateHash().equals(_myNodeInfo.getHash()))
-            throw new IllegalArgumentException("don't send to ourselves");
+        if (dest.calculateHash().equals(_myNodeInfo.getHash())) {
+            // skip self, e.g. our own node in the routing table (or a sibling KRPC
+            // sharing this destination). Throwing here aborted the whole DHT lookup
+            // and crashed the explorer; callers handle a false return as a skip.
+            if (_log.shouldLog(Log.DEBUG))
+                logDebug("Not sending to ourselves: " + dest);
+            return false;
+        }
         byte[] payload = BEncoder.bencode(map);
         if (_log.shouldLog(Log.DEBUG)) {
             ByteArrayInputStream bais = new ByteArrayInputStream(payload);
