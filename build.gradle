@@ -70,6 +70,6 @@ publishing {
 }
 
 wrapper {
-    gradleVersion = '8.6'
+    gradleVersion = '8.10'
     distributionType = Wrapper.DistributionType.BIN
 }
