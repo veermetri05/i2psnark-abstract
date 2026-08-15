@@ -201,7 +201,10 @@ public class KRPC implements DatagramListener, DHT {
     private static final long EXPLORE_TIME = 877*1000;
     private static final long BLACKLIST_CLEAN_TIME = 67*60*1000;
     private static final int BLACKLIST_MAX_PEERS = 500;
-    private static final long NODES_SAVE_TIME = 3*60*60*1000;
+    /** how often the routing table is persisted (5 min — a 3 h interval left
+     *  the table 3 h stale after an OS kill; stale nodes get pruned before
+     *  the next save and the table drains to 0) */
+    private static final long NODES_SAVE_TIME = 5*60*1000;
     public static final String DHT_FILE_SUFFIX = ".dht.dat";
 
     private static final int SEND_CRYPTO_TAGS = 8;
