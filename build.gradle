@@ -48,8 +48,8 @@ test {
 }
 
 // ── Publishing ──────────────────────────────────────────────────────
-// `./gradlew publishToMavenLocal` makes the library available to the
-// desktop crawler (i2p_trials) which already lists mavenLocal().
+// `./gradlew publishToMavenLocal` makes the library available to
+// local desktop consumers via mavenLocal().
 
 publishing {
     publications {

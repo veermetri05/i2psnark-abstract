@@ -108,7 +108,7 @@ isolated.
 One class in your app wires everything:
 
 ```java
-// Desktop (i2p_trials / crawler):
+// Desktop / crawler:
 Environment env = Environment.basic(new FileStorage(dataDir));
 EventBus bus = new SimpleEventBus("crawler");
 Logs.setFactory(new BusLogFactory(bus, new ConsoleLogFactory()));
@@ -153,10 +153,9 @@ MetadataDownloader.download(connector, dest, ih, MetadataDownloader.toBus(bus));
 
 ### Desktop notes
 
-* `i2p_trials` already lists `mavenLocal()`: add
-  `implementation "org.klomp:i2psnark-abstract:0.1.0"` and delete the
-  duplicated `org.klomp.snark.*` sources / the `lib/i2psnark.jar`
-  dependency for these classes.
+* Add `implementation "org.klomp:i2psnark-abstract:0.1.0"` (via
+  `mavenLocal()` or JitPack) and delete any duplicated
+  `org.klomp.snark.*` sources / `lib/i2psnark.jar` dependency.
 * KRPC no longer takes `I2PSession`; wrap your session in a
   `DatagramTransport` (the old `I2CPTransport`/`SAMTransport` classes
   become adapters).
